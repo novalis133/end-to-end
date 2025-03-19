@@ -1,0 +1,21 @@
+# Core ML and Computer Vision
+torch>=2.1.0
+torchvision>=0.16.0
+opencv-python>=4.8.0
+transformers>=4.36.0
+ultralytics>=8.1.0
+
+# Kafka and Streaming
+confluent-kafka>=2.3.0
+python-confluent-kafka[avro]>=2.3.0
+
+# Web Interface
+streamlit>=1.31.0
+
+# Security and Utils
+python-dotenv>=1.0.0
+cryptography>=42.0.0
+pyyaml>=6.0.1
+
+# YOLO-World (will be installed from git)
+git+https://github.com/AILab-CVC/YOLO-World.git
