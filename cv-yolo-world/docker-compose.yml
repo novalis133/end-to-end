@@ -1,0 +1,121 @@
+version: '3.8'
+
+services:
+  # Kafka broker with SSL/TLS
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_LISTENERS: SSL://:9092
+      KAFKA_ADVERTISED_LISTENERS: SSL://kafka:9092
+      KAFKA_SSL_KEYSTORE_FILENAME: /etc/kafka/secrets/kafka.keystore.jks
+      KAFKA_SSL_KEYSTORE_CREDENTIALS: /etc/kafka/secrets/keystore_creds
+      KAFKA_SSL_KEY_CREDENTIALS: /etc/kafka/secrets/key_creds
+      KAFKA_SSL_TRUSTSTORE_FILENAME: /etc/kafka/secrets/kafka.truststore.jks
+      KAFKA_SSL_TRUSTSTORE_CREDENTIALS: /etc/kafka/secrets/truststore_creds
+      KAFKA_SSL_CLIENT_AUTH: required
+      KAFKA_SECURITY_PROTOCOL: SSL
+      KAFKA_NUM_PARTITIONS: 4
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      KAFKA_LOG_RETENTION_HOURS: 24
+    volumes:
+      - ./security:/etc/kafka/secrets
+
+  # Preprocessing container
+  preprocess:
+    build:
+      context: .
+      dockerfile: preprocess/Dockerfile
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_SSL_KEYSTORE_PASSWORD: ${KAFKA_SSL_KEYSTORE_PASSWORD}
+      VIDEO_SOURCE: ${VIDEO_SOURCE:-0}
+      DETECTION_PROMPT: ${DETECTION_PROMPT:-"detect person, car, bike"}
+    volumes:
+      - ./security:/security:ro
+
+  # Inference containers (4 parallel workers)
+  inference-0:
+    build:
+      context: .
+      dockerfile: inference/Dockerfile
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_SSL_KEYSTORE_PASSWORD: ${KAFKA_SSL_KEYSTORE_PASSWORD}
+      KAFKA_PARTITION: 0
+      MODEL_ENCRYPTION_KEY: ${MODEL_ENCRYPTION_KEY}
+    volumes:
+      - ./security:/security:ro
+      - ./models:/models:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  inference-1:
+    <<: *inference-base
+    environment:
+      <<: *inference-env
+      KAFKA_PARTITION: 1
+
+  inference-2:
+    <<: *inference-base
+    environment:
+      <<: *inference-env
+      KAFKA_PARTITION: 2
+
+  inference-3:
+    <<: *inference-base
+    environment:
+      <<: *inference-env
+      KAFKA_PARTITION: 3
+
+  # Visualization container with Streamlit
+  visualization:
+    build:
+      context: .
+      dockerfile: visualization/Dockerfile
+    ports:
+      - "8501:8501"
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_SSL_KEYSTORE_PASSWORD: ${KAFKA_SSL_KEYSTORE_PASSWORD}
+    volumes:
+      - ./security:/security:ro
+
+volumes:
+  security:
+    driver: local
+
+x-inference-base: &inference-base
+  build:
+    context: .
+    dockerfile: inference/Dockerfile
+  depends_on:
+    - kafka
+  volumes:
+    - ./security:/security:ro
+    - ./models:/models:ro
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: 1
+            capabilities: [gpu]
+
+x-inference-env: &inference-env
+  KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  KAFKA_SSL_KEYSTORE_PASSWORD: ${KAFKA_SSL_KEYSTORE_PASSWORD}
+  MODEL_ENCRYPTION_KEY: ${MODEL_ENCRYPTION_KEY}
